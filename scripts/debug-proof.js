@@ -7,94 +7,161 @@ const circomlibjs = require("circomlibjs");
 async function main() {
     console.log("Debugging proof verification...");
 
-    // 检查必要文件
-    const wasmFile = path.join(__dirname, "../circuits/vote_js/vote.wasm");
-    const zkeyFile = path.join(__dirname, "../circuits/vote_0001.zkey");
+    // check necessary files
+    const voteWasmFile = path.join(__dirname, "../circuits/vote_js/vote.wasm");
+    const revealWasmFile = path.join(__dirname, "../circuits/reveal_js/reveal.wasm");
+    const voteZkeyFile = path.join(__dirname, "../circuits/vote_0001.zkey");
+    const revealZkeyFile = path.join(__dirname, "../circuits/reveal_0001.zkey");
 
-    if (!fs.existsSync(wasmFile) || !fs.existsSync(zkeyFile)) {
+    if (!fs.existsSync(voteWasmFile) || !fs.existsSync(voteZkeyFile)) {
         console.error("Missing circuit files. Please compile the circuit first.");
         return;
     }
 
-    // 部署验证者合约
+    if (!fs.existsSync(revealWasmFile) || !fs.existsSync(revealZkeyFile)) {
+        console.error("Missing circuit files. Please compile the circuit first.");
+        return;
+    }
+
+    // deploy verifier contract
     const [admin] = await ethers.getSigners();
 
     console.log("Deploying verifier contract...");
-    const Verifier = await ethers.getContractFactory("Groth16Verifier");
-    const verifier = await Verifier.deploy();
-    await verifier.waitForDeployment();
-    console.log("Verifier deployed at:", verifier.target);
+    const VoteVerifier = await ethers.getContractFactory("VoteGroth16Verifier");
+    const voteVerifier = await VoteVerifier.deploy();
+    await voteVerifier.waitForDeployment();
+    console.log("VoteVerifier deployed at:", voteVerifier.target);
 
-    // 生成选民数据
+    const RevealVerifier = await ethers.getContractFactory("RevealGroth16Verifier");
+    const revealVerifier = await RevealVerifier.deploy();
+    await revealVerifier.waitForDeployment();
+    console.log("RevealVerifier deployed at:", revealVerifier.target);
+
+    // generate voter data
     console.log("Generating voter data...");
-    const secret = BigInt(123456); // 使用固定值便于调试
+    const secret = BigInt(123456); // use fixed value for debugging
     console.log("Voter secret:", secret.toString());
 
-    // 初始化Poseidon哈希
+    // initialize Poseidon hasher
     console.log("Initializing Poseidon hasher...");
     const poseidon = await circomlibjs.buildPoseidon();
 
-    // 计算承诺
+    // calculate commitment
     const hash = poseidon.F.toString(poseidon([secret]));
     console.log("Calculated commitment:", hash);
 
-    // 计算nullifier
+    // calculate nullifier
     const voteOption = 1;
-    const nullifier = poseidon.F.toString(poseidon([secret, BigInt(voteOption)]));
+    const voteSalt = BigInt(789012); // random salt
+    const nullifier = poseidon.F.toString(poseidon([secret, BigInt(0)]));
     console.log("Calculated nullifier:", nullifier);
 
-    // 准备输入
+    const voteOptionHash = poseidon.F.toString(poseidon([BigInt(voteOption), voteSalt]));
+    console.log("Calculated voteOptionHash:", voteOptionHash);
+
+
+
+    // prepare input
     const input = {
         privVoterSecret: secret.toString(),
         privVoteOption: voteOption,
+        privVoteSalt: voteSalt.toString(),
         pubVoterCommitment: hash,
-        pubNullifier: nullifier
+        pubNullifier: nullifier,
+        pubVoteOptionHash: voteOptionHash
     };
 
     console.log("Input for proof generation:", JSON.stringify(input, null, 2));
 
     console.log("Generating proof...");
-    const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+    const { proof: voteProof, publicSignals: votePublicSignals } = await snarkjs.groth16.fullProve(
         input,
-        wasmFile,
-        zkeyFile
+        voteWasmFile,
+        voteZkeyFile
     );
 
     console.log("Proof generated successfully");
-    console.log("Public signals:", publicSignals);
+    console.log("Public signals:", votePublicSignals);
 
 
-    // 格式化证明
+    // format proof
     const formattedProof = {
-        a: [proof.pi_a[0], proof.pi_a[1]],
+        a: [voteProof.pi_a[0], voteProof.pi_a[1]],
         b: [
-            [proof.pi_b[0][1], proof.pi_b[0][0]],
-            [proof.pi_b[1][1], proof.pi_b[1][0]]
+            [voteProof.pi_b[0][1], voteProof.pi_b[0][0]],
+            [voteProof.pi_b[1][1], voteProof.pi_b[1][0]]
         ],
-        c: [proof.pi_c[0], proof.pi_c[1]]
+        c: [voteProof.pi_c[0], voteProof.pi_c[1]]
     };
 
     console.log("Formatted proof:", JSON.stringify(formattedProof, null, 2));
 
-    // snarkjs验证证明
+    // snarkjs verification
     console.log("Verifying proof directly...");
 
-    console.log("Verifying with snarkjs...");
-    const vkeyJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../circuits/verification_key.json"), "utf8"));
-    const snarkjsVerification = await snarkjs.groth16.verify(vkeyJson, publicSignals, proof);
+
+    const voteVkeyJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../circuits/vote_verification_key.json"), "utf8"));
+    const snarkjsVerification = await snarkjs.groth16.verify(voteVkeyJson, votePublicSignals, voteProof);
     console.log("SnarkJS verification result:", snarkjsVerification);
 
-    try {
-        const isValid = await verifier.verifyProof(
-            formattedProof.a,
-            formattedProof.b,
-            formattedProof.c,
-            publicSignals
-        );
-        console.log("Direct verification result:", isValid);
-    } catch (error) {
-        console.error("Error verifying proof directly:", error);
-    }
+
+    // solidity verification
+    const isValid = await voteVerifier.verifyProof(
+        formattedProof.a,
+        formattedProof.b,
+        formattedProof.c,
+        votePublicSignals
+    );
+    console.log("Solidity verification result:", isValid);
+
+
+    // reveal input
+    const revealInput = {
+        privVoteSalt: voteSalt.toString(),
+        pubNullifier: nullifier,
+        pubVoteOptionHash: voteOptionHash,
+        pubVoteOption: voteOption
+    };
+
+    console.log("Reveal input:", JSON.stringify(revealInput, null, 2));
+
+    console.log("Generating reveal proof...");
+    const { proof: revealProof, publicSignals: revealPublicSignals } = await snarkjs.groth16.fullProve(
+        revealInput,
+        revealWasmFile,
+        revealZkeyFile
+    );
+
+    console.log("Reveal proof generated successfully");
+    console.log("Reveal public signals:", revealPublicSignals);
+
+    // format reveal proof
+    const formattedRevealProof = {
+        a: [revealProof.pi_a[0], revealProof.pi_a[1]],
+        b: [
+            [revealProof.pi_b[0][1], revealProof.pi_b[0][0]],
+            [revealProof.pi_b[1][1], revealProof.pi_b[1][0]]
+        ],
+        c: [revealProof.pi_c[0], revealProof.pi_c[1]]
+    };
+
+    console.log("Formatted reveal proof:", JSON.stringify(formattedRevealProof, null, 2));
+    
+    // snarkjs verification
+    console.log("Verifying reveal proof directly...");
+    const revealVkeyJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../circuits/reveal_verification_key.json"), "utf8"));
+    const snarkjsRevealVerification = await snarkjs.groth16.verify(revealVkeyJson, revealPublicSignals, revealProof);
+    console.log("SnarkJS reveal verification result:", snarkjsRevealVerification);
+    
+    // solidity verification
+    const isValidReveal = await revealVerifier.verifyProof(
+        formattedRevealProof.a,
+        formattedRevealProof.b,
+        formattedRevealProof.c,
+        revealPublicSignals
+    );
+    console.log("Solidity reveal verification result:", isValidReveal);
+    
 }
 
 main()
