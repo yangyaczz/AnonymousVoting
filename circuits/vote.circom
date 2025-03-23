@@ -5,24 +5,26 @@ include "../node_modules/circomlib/circuits/comparators.circom";
 include "../node_modules/circomlib/circuits/bitify.circom";
 
 template Vote() {
-    // 公共输入
-    signal input pubVoterCommitment; // 选民身份承诺
-    signal input pubNullifier; // 防止重复投票的nullifier
+    // Public inputs
+    signal input pubVoterCommitment; // Voter identity commitment
+    signal input pubNullifier; // Nullifier to prevent double voting
+    signal input pubVoteOptionHash; // Hash of the vote option (using salt)
     
-    // 私有输入
-    signal input privVoterSecret; // 选民私有秘密
-    signal input privVoteOption; // 投票选项的整数值
+    // Private inputs
+    signal input privVoterSecret; // Voter's private secret
+    signal input privVoteOption; // Integer value of the vote option
+    signal input privVoteSalt; // Salt value for the vote option
     
-    // 将投票选项转换为二进制位
+    // Convert vote option to binary bits
     component num2Bits = Num2Bits(4);
     num2Bits.in <== privVoteOption;
     
-    // 验证选民身份
+    // Verify voter identity
     component voterHasher = Poseidon(1);
     voterHasher.inputs[0] <== privVoterSecret;
     voterHasher.out === pubVoterCommitment;
     
-    // 确保投票选项在有效范围内 (1-15)
+    // Ensure vote option is within valid range (1-15)
     component gtZero = GreaterThan(4);
     gtZero.in[0] <== privVoteOption;
     gtZero.in[1] <== 0;
@@ -33,18 +35,17 @@ template Vote() {
     ltSixteen.in[1] <== 16;
     ltSixteen.out === 1;
     
-    // 计算nullifier以防止重复投票
+    // Calculate nullifier to prevent double voting
     component nullifierHasher = Poseidon(2);
     nullifierHasher.inputs[0] <== privVoterSecret;
-    nullifierHasher.inputs[1] <== privVoteOption;
+    nullifierHasher.inputs[1] <== 0; // Fixed value, independent of vote option
     nullifierHasher.out === pubNullifier;
     
-    // 添加对投票选项的承诺（可选）
-    // 这可以用来在投票结束后验证结果
-    // signal output pubVoteCommitment;
-    // component voteHasher = Poseidon(1);
-    // voteHasher.inputs[0] <== privVoteOption;
-    // pubVoteCommitment <== voteHasher.out;
+    // Calculate hash of vote option (using salt for privacy)
+    component voteHasher = Poseidon(2);
+    voteHasher.inputs[0] <== privVoteOption;
+    voteHasher.inputs[1] <== privVoteSalt;
+    voteHasher.out === pubVoteOptionHash;
 }
 
-component main {public [pubVoterCommitment, pubNullifier]} = Vote();
+component main {public [pubVoterCommitment, pubNullifier, pubVoteOptionHash]} = Vote();
