@@ -2,6 +2,12 @@
 
 This project implements a privacy-preserving voting system using zero-knowledge proofs (ZKPs) with Circom and the Groth16 proving system. Each voter generates a cryptographic commitment to their identity and vote choice, ensuring anonymity while preventing double voting through a nullifier mechanism. The system utilizes Poseidon hashing for efficient commitments and enforces valid vote options within a specified range. The proof is verified both off-chain using snarkjs and on-chain via a Groth16 verifier smart contract.
 
+```shell
+npx hardhat run scripts/test-voting.js
+npx hardhat run scripts/debug-proof.js
+npx hardhat test
+```
+
 # Steps for setting up zero-knowledge proof
 
 ## 1. compile circuit
