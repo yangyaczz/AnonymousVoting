@@ -12,45 +12,49 @@ npx hardhat node
 npx hardhat ignition deploy ./ignition/modules/Lock.js
 ```
 
-# 零知识证明设置步骤
+# Anoymous Voting
 
-## 1. 编译电路
+This project implements a privacy-preserving voting system using zero-knowledge proofs (ZKPs) with Circom and the Groth16 proving system. Each voter generates a cryptographic commitment to their identity and vote choice, ensuring anonymity while preventing double voting through a nullifier mechanism. The system utilizes Poseidon hashing for efficient commitments and enforces valid vote options within a specified range. The proof is verified both off-chain using snarkjs and on-chain via a Groth16 verifier smart contract.
+
+# Steps for setting up zero-knowledge proof
+
+## 1. compile circuit
 ```shell
-# 确保在项目根目录下执行
+# in project root
 cd circuits
 circom vote.circom --r1cs --wasm --sym
 ```
 
-## 2. 生成trusted setup (仅用于测试)
+## 2. generate trusted setup (only for testing)
 ```shell
-# 确保所有命令在项目根目录下执行
-# 第一步：生成初始的powers of tau
+# in project root
+# Step 1: Generate initial powers of tau
 snarkjs powersoftau new bn128 14 pot14_0000.ptau -v
 
-# 第二步：第一次贡献
+# Step 2: First contribution
 snarkjs powersoftau contribute pot14_0000.ptau pot14_0001.ptau --name="First contribution" -v
 
-# 第三步：准备phase 2
+# Step 3: Prepare phase 2
 snarkjs powersoftau prepare phase2 pot14_0001.ptau pot14_final.ptau -v
 
-# 第四步：设置电路特定的key
-# 注意：确保使用正确的r1cs文件路径
+# Step 4: Set circuit-specific key
+# Note: Ensure using the correct r1cs file path
 snarkjs groth16 setup vote.r1cs pot14_final.ptau vote_0000.zkey
 
-# 第五步：为zkey贡献随机性
+# Step 5: Contribute randomness to zkey
 snarkjs zkey contribute vote_0000.zkey vote_0001.zkey --name="Second contribution" -v
 
-# 第六步：导出验证密钥
+# Step 6: Export verification key
 snarkjs zkey export verificationkey vote_0001.zkey verification_key.json
 ```
 
-## 3. 生成Solidity验证者
+## 3. generate solidity verifier
 ```shell
-# 确保vote_0001.zkey文件存在
+# Ensure vote_0001.zkey file exists
 snarkjs zkey export solidityverifier vote_0001.zkey ../contracts/VoteVerifier.sol
 ```
 
-## 注意事项
-- 所有命令都应该在项目根目录下执行
-- 确保在执行每个步骤之前，前一个步骤生成的文件都存在
-- 如果遇到文件不存在的错误，请检查文件路径和是否完成了前序步骤
+## Notes
+- All commands should be executed in the project root
+- Ensure that the files generated in each step exist before executing the next step
+- If you encounter errors about missing files, check the file paths and ensure all previous steps have been completed
