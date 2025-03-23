@@ -91,8 +91,6 @@ describe("Anonymous Voting System", function() {
   
   describe("Contract Deployment", function() {
     it("should correctly set the admin", async function() {
-      console.log("admin.address", admin.address);
-      console.log("anonymousVoting.admin()", await anonymousVoting.admin());
       expect(await anonymousVoting.admin()).to.equal(admin.address);
     });
     

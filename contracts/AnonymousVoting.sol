@@ -87,14 +87,14 @@ contract AnonymousVoting {
         uint[2][2] memory b,
         uint[2] memory c,
         uint256 voterCommitment,
-        uint256 voteOption, // 这个参数现在是私有的，不会被验证
+        // uint256 voteOption, // 这个参数现在是私有的，不会被验证
         uint256 nullifier
     ) external votingOpen {
         // 验证选民是否已注册
         require(registeredVoterCommitments[voterCommitment], "Voter not registered");
         
         // 验证投票选项是否有效
-        require(voteOption > 0 && voteOption <= optionsCount, "Invalid vote option");
+        // require(voteOption > 0 && voteOption <= optionsCount, "Invalid vote option");
         
         // 验证nullifier是否已使用
         require(!usedNullifiers[nullifier], "Voter already voted");
@@ -104,7 +104,7 @@ contract AnonymousVoting {
         require(verifier.verifyProof(a, b, c, input), "Proof verification failed");
         
         // 记录投票
-        voteCounts[voteOption]++;
+        // voteCounts[voteOption]++;
         usedNullifiers[nullifier] = true;
         
         emit VoteCast(voterCommitment, nullifier);
