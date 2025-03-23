@@ -6,43 +6,33 @@ interface IVerifier {
         uint[2] memory a,
         uint[2][2] memory b,
         uint[2] memory c,
-        uint[3] memory input
+        uint[2] memory input
     ) external view returns (bool);
 }
 
 contract AnonymousVoting {
     address public admin;
     uint256 public votingEndTime;
+    uint256 public optionsCount;
+    IVerifier public verifier;
     bool public resultRevealed;
     
-    // 投票选项数量
-    uint256 public optionsCount;
-    
-    // 投票计数
-    mapping(uint256 => uint256) private voteCounts;
-    
-    // 已使用的nullifier，防止重复投票
-    mapping(uint256 => bool) public usedNullifiers;
-    
-    // 已注册的选民承诺
+    // 记录已注册的选民承诺
     mapping(uint256 => bool) public registeredVoterCommitments;
     
-    // 验证者合约
-    IVerifier public verifier;
+    // 记录已使用的nullifier，防止重复投票
+    mapping(uint256 => bool) public usedNullifiers;
     
-    // 投票结果
+    // 记录每个选项的投票数
+    mapping(uint256 => uint256) private voteCounts;
+    
+    // 最终结果
     uint256[] public finalResults;
     
+    // 事件
     event VoterRegistered(uint256 commitment);
-    event VoteCast(uint256 nullifier, uint256 option);
-    event ResultRevealed();
-    
-    constructor(address _admin, uint256 _votingDuration, uint256 _optionsCount, address _verifierAddress) {
-        admin = _admin;
-        votingEndTime = block.timestamp + _votingDuration;
-        optionsCount = _optionsCount;
-        verifier = IVerifier(_verifierAddress);
-    }
+    event VoteCast(uint256 voterCommitment, uint256 nullifier);
+    event ResultsRevealed();
     
     modifier onlyAdmin() {
         require(msg.sender == admin, "Only the admin can call this function");
@@ -59,7 +49,22 @@ contract AnonymousVoting {
         _;
     }
     
-    // 注册选民
+    constructor(
+        address _admin,
+        uint256 _votingDuration,
+        uint256 _optionsCount,
+        address _verifier
+    ) {
+        admin = _admin;
+        votingEndTime = block.timestamp + _votingDuration;
+        optionsCount = _optionsCount;
+        verifier = IVerifier(_verifier);
+        
+        // 初始化结果数组
+        finalResults = new uint256[](_optionsCount + 1);
+    }
+    
+    // 注册单个选民
     function registerVoter(uint256 commitment) external onlyAdmin {
         require(!registeredVoterCommitments[commitment], "Voter commitment already registered");
         registeredVoterCommitments[commitment] = true;
@@ -68,7 +73,7 @@ contract AnonymousVoting {
     
     // 批量注册选民
     function batchRegisterVoters(uint256[] calldata commitments) external onlyAdmin {
-        for (uint i = 0; i < commitments.length; i++) {
+        for (uint256 i = 0; i < commitments.length; i++) {
             if (!registeredVoterCommitments[commitments[i]]) {
                 registeredVoterCommitments[commitments[i]] = true;
                 emit VoterRegistered(commitments[i]);
@@ -76,50 +81,45 @@ contract AnonymousVoting {
         }
     }
     
-    // 投票函数
+    // 投票
     function castVote(
         uint[2] memory a,
         uint[2][2] memory b,
         uint[2] memory c,
         uint256 voterCommitment,
-        uint256 voteOption,
+        uint256 voteOption, // 这个参数现在是私有的，不会被验证
         uint256 nullifier
     ) external votingOpen {
-        // Verify voter is registered
+        // 验证选民是否已注册
         require(registeredVoterCommitments[voterCommitment], "Voter not registered");
         
-        // Verify vote option is valid
+        // 验证投票选项是否有效
         require(voteOption > 0 && voteOption <= optionsCount, "Invalid vote option");
         
-        // Verify nullifier has not been used
+        // 验证nullifier是否已使用
         require(!usedNullifiers[nullifier], "Voter already voted");
         
-        // Verify zero-knowledge proof
-        uint[3] memory input = [voterCommitment, voteOption, nullifier];
+        // 验证零知识证明
+        uint[2] memory input = [voterCommitment, nullifier];
         require(verifier.verifyProof(a, b, c, input), "Proof verification failed");
         
-        // Mark nullifier as used
+        // 记录投票
+        voteCounts[voteOption]++;
         usedNullifiers[nullifier] = true;
         
-        // Record vote
-        voteCounts[voteOption] += 1;
-        
-        emit VoteCast(nullifier, voteOption);
+        emit VoteCast(voterCommitment, nullifier);
     }
     
     // 揭示结果
     function revealResults() external onlyAdmin votingClosed {
         require(!resultRevealed, "Results already revealed");
         
-        resultRevealed = true;
-        
-        // Collect vote counts for all options
-        finalResults = new uint256[](optionsCount + 1); // +1 because options start from 1
         for (uint256 i = 1; i <= optionsCount; i++) {
             finalResults[i] = voteCounts[i];
         }
         
-        emit ResultRevealed();
+        resultRevealed = true;
+        emit ResultsRevealed();
     }
     
     // 获取投票结果
@@ -128,7 +128,7 @@ contract AnonymousVoting {
         return finalResults;
     }
     
-    // Extend voting time
+    // 延长投票时间
     function extendVoting(uint256 additionalTime) external onlyAdmin votingOpen {
         votingEndTime += additionalTime;
     }
